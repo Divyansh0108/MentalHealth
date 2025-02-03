@@ -9,7 +9,10 @@ from predict_mental_health import predict_mental_health
 genai.configure(api_key=st.secrets["API_KEY"])
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-mental_health_model = load_model('../Notebooks/mental_health_model.h5')
+import os
+
+model_path = os.path.join(os.path.dirname(__file__), '..', 'Model', 'mental_health_model.h5')
+mental_health_model = load_model(model_path)
 
 sleep_mapping = {
     'Less than 5 hours': {'value': 0, 'risk': 'High Sleep Disruption 😴', 'impact': 'Severe negative impact on mental health'},

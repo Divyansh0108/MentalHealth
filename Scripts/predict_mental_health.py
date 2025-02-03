@@ -3,9 +3,13 @@ from tensorflow.keras.models import load_model
 from sklearn.preprocessing import StandardScaler
 import pickle
 
-model = load_model('../Model/mental_health_model.h5')
+import os
 
-with open('../Model/scaler.pkl', 'rb') as file:
+model_path = os.path.join(os.path.dirname(__file__), '..', 'Model', 'mental_health_model.h5')
+model = load_model(model_path)
+
+scaler_path = os.path.join(os.path.dirname(__file__), '..', 'Model', 'scaler.pkl')
+with open(scaler_path, 'rb') as file:
     scaler = pickle.load(file)
 
 def predict_mental_health(new_data):
