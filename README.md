@@ -1,5 +1,7 @@
 # Mental Health Predictor 🧠
 
+**Experience the Live Demo Now** - Visit the [Live Demo](https://mentalhealth-01.streamlit.app/) to explore how this tool can assist in understanding mental well-being. This could be a significant step towards managing mental health more effectively. 🌟
+
 ## Name of the Project
 Mental Health Predictor and Advisor
 
