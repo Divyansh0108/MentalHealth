@@ -1,15 +1,14 @@
 import numpy as np
 import streamlit as st
 import google.generativeai as genai
-import shap
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
 from predict_mental_health import predict_mental_health
+from lime import lime_tabular
+import os
 
 genai.configure(api_key=st.secrets["API_KEY"])
 model = genai.GenerativeModel("gemini-1.5-flash")
-
-import os
 
 model_path = os.path.join(os.path.dirname(__file__), '..', 'Model', 'mental_health_model.h5')
 mental_health_model = load_model(model_path)
@@ -81,9 +80,9 @@ def generate_detailed_explanation(prediction, symptoms, feature_details, respons
             color = "red"
 
     prompt = f"User Profile Details:\n" \
-             f"Current Mental Health Prediction: {'Normal' if prediction == 0 else 'Depression'}\n" \
-             f"Key Insights: {' '.join(feature_insights)}\n\n" \
-             f"Provide a {'brief' if response_level == 'concise' else 'comprehensive'}, empathetic guidance focusing on mental health support and potential interventions."
+            f"Current Mental Health Prediction: {'Normal' if prediction == 0 else 'Depression'}\n" \
+            f"Key Insights: {' '.join(feature_insights)}\n\n" \
+            f"Provide a {'brief' if response_level == 'concise' else 'comprehensive'}, empathetic guidance focusing on mental health support and potential interventions."
 
     try:
         response = model.generate_content(prompt)
@@ -100,33 +99,91 @@ def generate_detailed_explanation(prediction, symptoms, feature_details, respons
         'ai_insights': ai_insights
     }
 
-def explain_with_shap(symptoms):
-    symptoms = np.array(symptoms).reshape(1, -1)
+def explain_with_lime(symptoms, feature_names):
+    symptoms_array = np.array(symptoms).reshape(1, -1)
     
     try:
-        background = np.zeros_like(symptoms)
-        explainer = shap.DeepExplainer(mental_health_model, background)
-        shap_values = explainer.shap_values(symptoms)
+        def predict_fn(x):
+            return mental_health_model.predict(x)
         
-        plt.figure(figsize=(15, 10))
+        explainer = lime_tabular.LimeTabularExplainer(
+            training_data=np.zeros((1, len(symptoms))),
+            feature_names=feature_names,
+            class_names=['Normal', 'Depression'],
+            mode='classification',
+            random_state=42
+        )
         
-        plt.subplot(2, 1, 1)
-        shap.summary_plot(shap_values[0], symptoms[0], plot_type="bar", show=False)
-        plt.title("Feature Importance in Mental Health Prediction 📊")
+        explanation = explainer.explain_instance(
+            symptoms_array[0],
+            predict_fn,
+            num_features=len(feature_names),
+            num_samples=5000
+        )
         
-        plt.subplot(2, 1, 2)
-        shap.summary_plot(shap_values[0], symptoms[0], show=False)
-        plt.title("Detailed Feature Impact Visualization 🔍")
+        feature_importance = explanation.as_list()
+        features, importance = zip(*feature_importance)
         
-        plt.tight_layout()
-        plt.savefig('shap_plot_detailed.png')
+        # Create figure with two subplots
+        fig = plt.figure(figsize=(15, 10))
+        
+        # First subplot: Horizontal bar chart of feature importance
+        plt.subplot(1, 2, 1)
+        y_pos = np.arange(len(features))
+        colors = ['#FF6B6B' if imp < 0 else '#4ECDC4' for imp in importance]
+        
+        bars = plt.barh(y_pos, importance)
+        for i, bar in enumerate(bars):
+            bar.set_color(colors[i])
+            width = bar.get_width()
+            plt.text(width + (0.01 if width >= 0 else -0.01),
+                    bar.get_y() + bar.get_height()/2,
+                    f'{importance[i]:.3f}',
+                    ha='left' if width >= 0 else 'right',
+                    va='center')
+        
+        plt.yticks(y_pos, features)
+        plt.xlabel('Impact on Depression Prediction')
+        plt.title('Feature Importance Analysis')
+        plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+        
+        # Second subplot: Feature impact visualization
+        plt.subplot(1, 2, 2)
+        sorted_importance = sorted(feature_importance, key=lambda x: abs(x[1]), reverse=True)
+        features_sorted, importance_sorted = zip(*sorted_importance)
+        
+        y_pos = np.arange(len(features_sorted))
+        colors = ['#FF6B6B' if imp < 0 else '#4ECDC4' for imp in importance_sorted]
+        
+        plt.barh(y_pos, [abs(i) for i in importance_sorted], color=colors)
+        
+        for i, v in enumerate(importance_sorted):
+            plt.text(abs(v) + 0.01, i, 
+                    f'{"+" if v > 0 else "-"}{abs(v):.3f}',
+                    va='center')
+        
+        plt.yticks(y_pos, features_sorted)
+        plt.xlabel('Absolute Impact Magnitude')
+        plt.title('Feature Impact Ranking')
+        
+        plt.tight_layout(pad=3.0)
+        plt.savefig('lime_plot_detailed.png', bbox_inches='tight', dpi=300, facecolor='white')
         plt.close()
         
-        return 'shap_plot_detailed.png'
+        # Sort feature importance for display
+        feature_importance_sorted = sorted(feature_importance, key=lambda x: abs(x[1]), reverse=True)
+        
+        return 'lime_plot_detailed.png', feature_importance_sorted
     
     except Exception as e:
-        st.error(f"Error in SHAP explanation: {e}")
-        return None
+        st.error(f"Error in LIME explanation: {str(e)}")
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, f"Unable to generate LIME plots: {str(e)}", 
+                ha='center', va='center', wrap=True)
+        plt.axis('off')
+        plt.savefig('lime_plot_error.png')
+        plt.close()
+        return 'lime_plot_error.png', []
 
 def main():
     st.title('Comprehensive Mental Health Predictor and Advisor 🧠')
@@ -156,6 +213,10 @@ def main():
     response_level = 'concise' if quick_insights else 'detailed'
 
     if quick_insights or detailed_analysis:
+        feature_names = ['Gender', 'Age', 'Academic Pressure', 'CGPA', 'Study Satisfaction', 
+                        'Sleep Duration', 'Dietary Habits', 'Suicidal Thoughts', 
+                        'Work/Study Hours', 'Financial Stress', 'Family History', 'Education Level']
+        
         symptoms = [
             0 if gender == 'Male' else 1,
             age,
@@ -207,9 +268,14 @@ def main():
             st.write(explanation['ai_insights'])
             
             st.markdown("#### Model Interpretation 📈")
-            shap_plot = explain_with_shap(symptoms)
-            if shap_plot:
-                st.image(shap_plot, caption="Detailed Feature Impact Analysis")
+            lime_plot, feature_importance = explain_with_lime(symptoms, feature_names)
+            if lime_plot:
+                st.image(lime_plot, caption="Detailed Feature Impact Analysis")
+                
+                st.markdown("#### Feature Importance Details:")
+                for feature, importance in feature_importance:
+                    color = "red" if importance < 0 else "blue"
+                    st.markdown(f"- <span style='color:{color}'>{feature}: {importance:.3f}</span>", unsafe_allow_html=True)
             
             st.markdown("### Recommended Next Steps 📋")
             st.markdown("""
